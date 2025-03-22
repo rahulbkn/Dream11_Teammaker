@@ -23,21 +23,29 @@ async def start(update: Update, context):
 
 # Scrape command
 async def scrape(update: Update, context):
-    await update.message.reply_text("Please enter the URL of the match page on ESPN Cricinfo:")
+    await update.message.reply_text("Please enter the URL of the match page (ESPN Cricinfo or Cricbuzz):")
     return INPUT_URL
 
 # Input URL and scrape data
 async def input_url(update: Update, context):
     url = update.message.text
 
-    # Scrape player stats
-    player_stats = scrape_player_stats(url)
+    # Determine the website and scrape data
+    if "espncricinfo.com" in url:
+        player_stats = scrape_espn_player_stats(url)
+        pitch_report = scrape_espn_pitch_report(url)
+    elif "cricbuzz.com" in url:
+        player_stats = scrape_cricbuzz_player_stats(url)
+        pitch_report = scrape_cricbuzz_pitch_report(url)
+    else:
+        await update.message.reply_text("Unsupported website. Please provide a valid ESPN Cricinfo or Cricbuzz URL.")
+        return ConversationHandler.END
+
+    # Check if scraping was successful
     if not player_stats:
         await update.message.reply_text("Failed to scrape player stats. Please check the URL.")
         return ConversationHandler.END
 
-    # Scrape pitch report
-    pitch_report = scrape_pitch_report(url)
     if not pitch_report:
         await update.message.reply_text("Failed to scrape pitch report. Please check the URL.")
         return ConversationHandler.END
@@ -53,25 +61,16 @@ async def input_url(update: Update, context):
     await update.message.reply_text("Data scraped successfully! Use /maketeam to generate a team.")
     return ConversationHandler.END
 
-# Function to scrape player stats
-def scrape_player_stats(url):
+# Function to scrape player stats from ESPN Cricinfo
+def scrape_espn_player_stats(url):
     try:
-        # Send a GET request to the URL
         response = requests.get(url)
         response.raise_for_status()  # Raise an error for bad status codes
 
-        # Parse the HTML content
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Find the table containing player stats
-        table = soup.select_one('table.batsman')
-        if not table:
-            logger.error("Player stats table not found on the page.")
-            return None
-
-        # Extract player stats
         player_stats = []
-        for row in table.select('tbody tr'):
+        for row in soup.select('table.batsman tbody tr'):
             columns = row.find_all('td')
             if len(columns) > 1:
                 player_name = columns[0].text.strip()
@@ -98,35 +97,74 @@ def scrape_player_stats(url):
                 })
 
         return player_stats
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to fetch the URL: {e}")
-        return None
     except Exception as e:
-        logger.error(f"Error scraping player stats: {e}")
+        logger.error(f"Error scraping ESPN player stats: {e}")
         return None
 
-# Function to scrape pitch report
-def scrape_pitch_report(url):
+# Function to scrape pitch report from ESPN Cricinfo
+def scrape_espn_pitch_report(url):
     try:
-        # Send a GET request to the URL
         response = requests.get(url)
-        response.raise_for_status()  # Raise an error for bad status codes
+        response.raise_for_status()
 
-        # Parse the HTML content
+        soup = BeautifulSoup(response.text, 'html.parser')
+        pitch_report = soup.find('div', class_='match-info').text.strip()
+        return pitch_report
+    except Exception as e:
+        logger.error(f"Error scraping ESPN pitch report: {e}")
+        return None
+
+# Function to scrape player stats from Cricbuzz
+def scrape_cricbuzz_player_stats(url):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Find the pitch report section
-        pitch_report = soup.find('div', class_='match-info')
-        if not pitch_report:
-            logger.error("Pitch report section not found on the page.")
-            return None
+        player_stats = []
+        for row in soup.select('table.cb-series-bat-tbl tbody tr'):
+            columns = row.find_all('td')
+            if len(columns) > 1:
+                player_name = columns[0].text.strip()
+                runs = columns[2].text.strip()
+                balls = columns[3].text.strip()
+                fours = columns[5].text.strip()
+                sixes = columns[6].text.strip()
+                strike_rate = columns[7].text.strip()
 
-        return pitch_report.text.strip()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to fetch the URL: {e}")
-        return None
+                # Handle missing or invalid data
+                try:
+                    runs = int(runs)
+                    balls = int(balls)
+                except ValueError:
+                    continue  # Skip players with invalid data
+
+                player_stats.append({
+                    "Player": player_name,
+                    "Runs": runs,
+                    "Balls": balls,
+                    "Fours": fours,
+                    "Sixes": sixes,
+                    "Strike Rate": strike_rate
+                })
+
+        return player_stats
     except Exception as e:
-        logger.error(f"Error scraping pitch report: {e}")
+        logger.error(f"Error scraping Cricbuzz player stats: {e}")
+        return None
+
+# Function to scrape pitch report from Cricbuzz
+def scrape_cricbuzz_pitch_report(url):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        pitch_report = soup.find('div', class_='cb-pitch-rpt').text.strip()
+        return pitch_report
+    except Exception as e:
+        logger.error(f"Error scraping Cricbuzz pitch report: {e}")
         return None
 
 # Make team command
@@ -175,12 +213,13 @@ async def cancel(update: Update, context):
 
 # Main function
 def main():
-    # Replace 'YOUR_TOKEN' with your bot's API token
+    # Fetch the bot token from the environment variable
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN environment variable not set.")
         return
 
+    # Create the Application
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Conversation handler for scraping data
