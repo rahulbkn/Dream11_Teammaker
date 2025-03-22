@@ -4,6 +4,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+import os
 
 # Enable logging
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -22,7 +23,7 @@ async def start(update: Update, context):
 
 # Scrape command
 async def scrape(update: Update, context):
-    await update.message.reply_text("https://www.espncricinfo.com/series/ipl-2025-1449924/kolkata-knight-riders-vs-royal-challengers-bengaluru-1st-match-1473438/live-cricket-score")
+    await update.message.reply_text("Please enter the URL of the match page on ESPN Cricinfo:")
     return INPUT_URL
 
 # Input URL and scrape data
@@ -69,6 +70,13 @@ def scrape_player_stats(url):
                 sixes = columns[6].text.strip()
                 strike_rate = columns[7].text.strip()
 
+                # Handle missing or invalid data
+                try:
+                    runs = int(runs)
+                    balls = int(balls)
+                except ValueError:
+                    continue  # Skip players with invalid data
+
                 player_stats.append({
                     "Player": player_name,
                     "Runs": runs,
@@ -112,10 +120,10 @@ async def make_team(update: Update, context):
     # Filter players based on pitch report
     if "batting-friendly" in pitch_report.lower():
         # Prioritize batsmen and all-rounders
-        filtered_players = [player for player in player_stats if int(player["Runs"]) > 30]
+        filtered_players = [player for player in player_stats if player["Runs"] > 30]
     else:
         # Prioritize bowlers
-        filtered_players = [player for player in player_stats if int(player["Balls"]) > 12]
+        filtered_players = [player for player in player_stats if player["Balls"] > 12]
 
     # Sort players by strike rate (descending order)
     sorted_players = sorted(filtered_players, key=lambda x: float(x["Strike Rate"]), reverse=True)
@@ -142,7 +150,12 @@ async def cancel(update: Update, context):
 # Main function
 def main():
     # Replace 'YOUR_TOKEN' with your bot's API token
-    application = Application.builder().token("YOUR_TOKEN").build()
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN environment variable not set.")
+        return
+
+    application = Application.builder().token(BOT_TOKEN).build()
 
     # Conversation handler for scraping data
     scrape_handler = ConversationHandler(
