@@ -56,11 +56,22 @@ async def input_url(update: Update, context):
 # Function to scrape player stats
 def scrape_player_stats(url):
     try:
+        # Send a GET request to the URL
         response = requests.get(url)
+        response.raise_for_status()  # Raise an error for bad status codes
+
+        # Parse the HTML content
         soup = BeautifulSoup(response.text, 'html.parser')
 
+        # Find the table containing player stats
+        table = soup.select_one('table.batsman')
+        if not table:
+            logger.error("Player stats table not found on the page.")
+            return None
+
+        # Extract player stats
         player_stats = []
-        for row in soup.select('table.batsman tbody tr'):
+        for row in table.select('tbody tr'):
             columns = row.find_all('td')
             if len(columns) > 1:
                 player_name = columns[0].text.strip()
@@ -87,6 +98,9 @@ def scrape_player_stats(url):
                 })
 
         return player_stats
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to fetch the URL: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error scraping player stats: {e}")
         return None
@@ -94,11 +108,23 @@ def scrape_player_stats(url):
 # Function to scrape pitch report
 def scrape_pitch_report(url):
     try:
+        # Send a GET request to the URL
         response = requests.get(url)
+        response.raise_for_status()  # Raise an error for bad status codes
+
+        # Parse the HTML content
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        pitch_report = soup.find('div', class_='match-info').text.strip()
-        return pitch_report
+        # Find the pitch report section
+        pitch_report = soup.find('div', class_='match-info')
+        if not pitch_report:
+            logger.error("Pitch report section not found on the page.")
+            return None
+
+        return pitch_report.text.strip()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to fetch the URL: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error scraping pitch report: {e}")
         return None
@@ -149,13 +175,12 @@ async def cancel(update: Update, context):
 
 # Main function
 def main():
-    # Fetch the bot token from the environment variable
+    # Replace 'YOUR_TOKEN' with your bot's API token
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN environment variable not set.")
         return
 
-    # Create the Application
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Conversation handler for scraping data
