@@ -22,7 +22,7 @@ async def start(update: Update, context):
 
 # Scrape command
 async def scrape(update: Update, context):
-    await update.message.reply_text("Please enter the URL of the match page on ESPN Cricinfo:")
+    await update.message.reply_text("https://www.espncricinfo.com/series/ipl-2025-1449924/kolkata-knight-riders-vs-royal-challengers-bengaluru-1st-match-1473438/live-cricket-score")
     return INPUT_URL
 
 # Input URL and scrape data
