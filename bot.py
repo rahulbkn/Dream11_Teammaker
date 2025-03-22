@@ -150,7 +150,7 @@ async def cancel(update: Update, context):
 # Main function
 def main():
     # Replace 'YOUR_TOKEN' with your bot's API token
-    BOT_TOKEN = os.getenv("BOT_TOKEN")
+    BOT_TOKEN = os.getenv("7967838214:AAHh1ExRNLaFBNC67iv400OetAXMUrIj5vE")
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN environment variable not set.")
         return
