@@ -149,12 +149,13 @@ async def cancel(update: Update, context):
 
 # Main function
 def main():
-    # Replace 'YOUR_TOKEN' with your bot's API token
-    BOT_TOKEN = os.getenv("7967838214:AAHh1ExRNLaFBNC67iv400OetAXMUrIj5vE")
+    # Fetch the bot token from the environment variable
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN environment variable not set.")
         return
 
+    # Create the Application
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Conversation handler for scraping data
