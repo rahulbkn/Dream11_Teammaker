@@ -1,116 +1,136 @@
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
 import logging
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
 
 # Enable logging
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Define states for conversation
-INPUT_NAME, INPUT_ROLE, INPUT_CREDIT, INPUT_POINTS, INPUT_PITCH, INPUT_STATS = range(6)
-
-# Store player data
-players = []
+# Conversation states
+INPUT_URL = 0
 
 # Start command
 async def start(update: Update, context):
     await update.message.reply_text(
         "Welcome to the Dream11 Team Maker Bot!\n\n"
-        "Use /addplayer to add a new player.\n"
+        "Use /scrape to fetch player stats and pitch report from a website.\n"
         "Use /maketeam to generate a team."
     )
 
-# Add player command
-async def add_player(update: Update, context):
-    await update.message.reply_text("Enter the player's name:")
-    return INPUT_NAME
+# Scrape command
+async def scrape(update: Update, context):
+    await update.message.reply_text("Please enter the URL of the match page on ESPN Cricinfo:")
+    return INPUT_URL
 
-# Input player name
-async def input_name(update: Update, context):
-    context.user_data["name"] = update.message.text
-    await update.message.reply_text("Enter the player's role (Batsman, Bowler, All-rounder, Wicket-keeper):")
-    return INPUT_ROLE
+# Input URL and scrape data
+async def input_url(update: Update, context):
+    url = update.message.text
 
-# Input player role
-async def input_role(update: Update, context):
-    context.user_data["role"] = update.message.text
-    await update.message.reply_text("Enter the player's credit points:")
-    return INPUT_CREDIT
+    # Scrape player stats
+    player_stats = scrape_player_stats(url)
+    if not player_stats:
+        await update.message.reply_text("Failed to scrape player stats. Please check the URL.")
+        return ConversationHandler.END
 
-# Input player credit
-async def input_credit(update: Update, context):
-    context.user_data["credit"] = float(update.message.text)
-    await update.message.reply_text("Enter the player's recent points:")
-    return INPUT_POINTS
+    # Scrape pitch report
+    pitch_report = scrape_pitch_report(url)
+    if not pitch_report:
+        await update.message.reply_text("Failed to scrape pitch report. Please check the URL.")
+        return ConversationHandler.END
 
-# Input player points
-async def input_points(update: Update, context):
-    context.user_data["points"] = int(update.message.text)
-    await update.message.reply_text("Enter the pitch report (e.g., batting-friendly, bowling-friendly):")
-    return INPUT_PITCH
+    # Store data in context
+    context.user_data["player_stats"] = player_stats
+    context.user_data["pitch_report"] = pitch_report
 
-# Input pitch report
-async def input_pitch(update: Update, context):
-    context.user_data["pitch"] = update.message.text
-    await update.message.reply_text("Enter the player's recent stats (e.g., last 5 matches):")
-    return INPUT_STATS
+    # Display scraped data
+    await update.message.reply_text(f"Player Stats:\n{pd.DataFrame(player_stats)}")
+    await update.message.reply_text(f"Pitch Report:\n{pitch_report}")
 
-# Input recent stats
-async def input_stats(update: Update, context):
-    context.user_data["stats"] = update.message.text
-
-    # Save player data
-    player = {
-        "name": context.user_data["name"],
-        "role": context.user_data["role"],
-        "credit": context.user_data["credit"],
-        "points": context.user_data["points"],
-        "pitch": context.user_data["pitch"],
-        "stats": context.user_data["stats"]
-    }
-    players.append(player)
-
-    await update.message.reply_text(f"Player {player['name']} added successfully!")
+    await update.message.reply_text("Data scraped successfully! Use /maketeam to generate a team.")
     return ConversationHandler.END
+
+# Function to scrape player stats
+def scrape_player_stats(url):
+    try:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        player_stats = []
+        for row in soup.select('table.batsman tbody tr'):
+            columns = row.find_all('td')
+            if len(columns) > 1:
+                player_name = columns[0].text.strip()
+                runs = columns[2].text.strip()
+                balls = columns[3].text.strip()
+                fours = columns[5].text.strip()
+                sixes = columns[6].text.strip()
+                strike_rate = columns[7].text.strip()
+
+                player_stats.append({
+                    "Player": player_name,
+                    "Runs": runs,
+                    "Balls": balls,
+                    "Fours": fours,
+                    "Sixes": sixes,
+                    "Strike Rate": strike_rate
+                })
+
+        return player_stats
+    except Exception as e:
+        logger.error(f"Error scraping player stats: {e}")
+        return None
+
+# Function to scrape pitch report
+def scrape_pitch_report(url):
+    try:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        pitch_report = soup.find('div', class_='match-info').text.strip()
+        return pitch_report
+    except Exception as e:
+        logger.error(f"Error scraping pitch report: {e}")
+        return None
 
 # Make team command
 async def make_team(update: Update, context):
-    if not players:
-        await update.message.reply_text("No players added yet. Use /addplayer to add players.")
+    if "player_stats" not in context.user_data or "pitch_report" not in context.user_data:
+        await update.message.reply_text("No data available. Use /scrape to fetch player stats and pitch report.")
         return
 
-    # Define team constraints
+    player_stats = context.user_data["player_stats"]
+    pitch_report = context.user_data["pitch_report"]
+
+    # Generate team
     team_composition = {"Batsman": 3, "Bowler": 2, "All-rounder": 2, "Wicket-keeper": 1}
     total_players = 11
     total_credits = 100
 
-    # Sort players by points (descending order)
-    sorted_players = sorted(players, key=lambda x: x["points"], reverse=True)
+    # Filter players based on pitch report
+    if "batting-friendly" in pitch_report.lower():
+        # Prioritize batsmen and all-rounders
+        filtered_players = [player for player in player_stats if int(player["Runs"]) > 30]
+    else:
+        # Prioritize bowlers
+        filtered_players = [player for player in player_stats if int(player["Balls"]) > 12]
 
-    # Select team
-    selected_team = []
-    remaining_credits = total_credits
-    remaining_roles = team_composition.copy()
+    # Sort players by strike rate (descending order)
+    sorted_players = sorted(filtered_players, key=lambda x: float(x["Strike Rate"]), reverse=True)
 
-    for player in sorted_players:
-        if len(selected_team) >= total_players:
-            break
-
-        role = player["role"]
-        if role in remaining_roles and player["credit"] <= remaining_credits:
-            selected_team.append(player)
-            remaining_credits -= player["credit"]
-            remaining_roles[role] -= 1
-            if remaining_roles[role] == 0:
-                del remaining_roles[role]
+    # Select top 11 players
+    selected_team = sorted_players[:11]
 
     # Display selected team
     team_message = "Selected Team:\n"
     for player in selected_team:
         team_message += (
-            f"{player['name']} ({player['role']}) - Credits: {player['credit']}, Points: {player['points']}\n"
+            f"{player['Player']} - Runs: {player['Runs']}, Balls: {player['Balls']}, "
+            f"Fours: {player['Fours']}, Sixes: {player['Sixes']}, Strike Rate: {player['Strike Rate']}\n"
         )
-    team_message += f"Remaining Credits: {remaining_credits}"
+    team_message += f"Remaining Credits: {total_credits}"
 
     await update.message.reply_text(team_message)
 
@@ -122,25 +142,20 @@ async def cancel(update: Update, context):
 # Main function
 def main():
     # Replace 'YOUR_TOKEN' with your bot's API token
-    application = Application.builder().token("7967838214:AAHh1ExRNLaFBNC67iv400OetAXMUrIj5vE").build()
+    application = Application.builder().token("YOUR_TOKEN").build()
 
-    # Conversation handler for adding players
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("addplayer", add_player)],
+    # Conversation handler for scraping data
+    scrape_handler = ConversationHandler(
+        entry_points=[CommandHandler("scrape", scrape)],
         states={
-            INPUT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_name)],
-            INPUT_ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_role)],
-            INPUT_CREDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_credit)],
-            INPUT_POINTS: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_points)],
-            INPUT_PITCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_pitch)],
-            INPUT_STATS: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_stats)],
+            INPUT_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_url)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(conv_handler)
+    application.add_handler(scrape_handler)
     application.add_handler(CommandHandler("maketeam", make_team))
 
     # Run the bot
